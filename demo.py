@@ -42,7 +42,6 @@ try:
 except NameError:
     xrange = range  # Python 3
 
-
 def parse_args():
   """
   Parse input arguments
@@ -144,8 +143,10 @@ if __name__ == '__main__':
 
   print('Called with args:')
   print(args)
-
+  if args.dataset == "coco" and args.net == "res101":
+    args.set_cfgs = ['ANCHOR_SCALES', '[4, 8, 16, 32]', 'ANCHOR_RATIOS', '[0.5,1,2]']
   if args.cfg_file is not None:
+    print("Loading conf from ", args.cfg_file)
     cfg_from_file(args.cfg_file)
   if args.set_cfgs is not None:
     cfg_from_list(args.set_cfgs)
@@ -176,7 +177,13 @@ if __name__ == '__main__':
   if args.net == 'vgg16':
     fasterRCNN = vgg16(pascal_classes, pretrained=False, class_agnostic=args.class_agnostic)
   elif args.net == 'res101':
-    fasterRCNN = resnet(pascal_classes, 101, pretrained=False, class_agnostic=args.class_agnostic)
+    if args.dataset == "coco":
+      coco_classes = open("coco.names", "r").read().split("\n")[0:-1]
+      coco_classes = ['__background__'] + coco_classes
+      pascal_classes = coco_classes
+      fasterRCNN = resnet(coco_classes, 101, pretrained=False, class_agnostic=args.class_agnostic)
+    else:
+      fasterRCNN = resnet(pascal_classes, 101, pretrained=False, class_agnostic=args.class_agnostic)
   elif args.net == 'res50':
     fasterRCNN = resnet(pascal_classes, 50, pretrained=False, class_agnostic=args.class_agnostic)
   elif args.net == 'res152':
@@ -190,6 +197,12 @@ if __name__ == '__main__':
   print("load checkpoint %s" % (load_name))
   if args.cuda > 0:
     checkpoint = torch.load(load_name)
+    # model_layers = fasterRCNN.state_dict().keys()
+    # cpt_layers = checkpoint['model'].keys()
+    # pdb.set_trace()
+    # for x, y in zip(model_layers, cpt_layers):
+    #   if x != y:
+    #     pdb.set_trace()
   else:
     checkpoint = torch.load(load_name, map_location=(lambda storage, loc: storage))
   fasterRCNN.load_state_dict(checkpoint['model'])
@@ -343,38 +356,54 @@ if __name__ == '__main__':
               cls_boxes = pred_boxes[inds, :]
             else:
               cls_boxes = pred_boxes[inds][:, j * 4:(j + 1) * 4]
-            
+
             cls_dets = torch.cat((cls_boxes, cls_scores.unsqueeze(1)), 1)
             # cls_dets = torch.cat((cls_boxes, cls_scores), 1)
             cls_dets = cls_dets[order]
             # keep = nms(cls_dets, cfg.TEST.NMS, force_cpu=not cfg.USE_GPU_NMS)
             keep = nms(cls_boxes[order, :], cls_scores[order], cfg.TEST.NMS)
             cls_dets = cls_dets[keep.view(-1).long()]
-            if vis:
-              im2show = vis_detections(im2show, pascal_classes[j], cls_dets.cpu().numpy(), 0.5)
+            # print("Processing", im_file)
+            if vis and j == 1:
+              print("Detected", im_file)
+              dets = cls_dets.cpu().numpy()
+              f = open(os.path.join("output_dir", os.path.basename(im_file)+".txt"), "w")
+              for i in range(dets.shape[0]):
+                  score = dets[i, -1]
+                  if score > 0.7:
+                      bbox = " ".join([str(x) for x in dets[i, :4]])
+                      f.write(bbox + " 0 " + str(score) + "\n")
+              f.close()
+              im2show = vis_detections(im2show, pascal_classes[j], cls_dets.cpu().numpy(), 0.70)
+              cv2.imwrite(os.path.join("output", imglist[num_images][:-4] + "_det.png"), im2show)
+  #
+  #     misc_toc = time.time()
+  #     nms_time = misc_toc - misc_ticu
+  #
+  #     if webcam_num == -1:
+  #         sys.stdout.write('im_detect: {:d}/{:d} {:.3f}s {:.3f}s   \r' \
+  #                          .format(num_images + 1, len(imglist), detect_time, nms_time))
+  #         sys.stdout.flush()
+  #
+  #     if vis and webcam_num == -1:
+  #         # cv2.imshow('test', im2show)
+  #         # cv2.waitKey(0)
+  #         result_path = os.path.join(args.image_dir, imglist[num_images][:-4] + "_det.jpg")
+  #         cv2.imwrite(result_path, im2show)
+  #     else:
+  #         im2showRGB = cv2.cvtColor(im2show, cv2.COLOR_BGR2RGB)
+  #         cv2.imshow("frame", im2showRGB)
+  #         total_toc = time.time()
+  #         total_time = total_toc - total_tic
+  #         frame_rate = 1 / total_time
+  #         print('Frame rate:', frame_rate)
+  #         if cv2.waitKey(1) & 0xFF == ord('q'):
+  #             break
+  # if webcam_num >= 0:
+  #     cap.release()
+  #     cv2.destroyAllWintdows()
 
-      misc_toc = time.time()
-      nms_time = misc_toc - misc_tic
-
-      if webcam_num == -1:
-          sys.stdout.write('im_detect: {:d}/{:d} {:.3f}s {:.3f}s   \r' \
-                           .format(num_images + 1, len(imglist), detect_time, nms_time))
-          sys.stdout.flush()
-
-      if vis and webcam_num == -1:
-          # cv2.imshow('test', im2show)
-          # cv2.waitKey(0)
-          result_path = os.path.join(args.image_dir, imglist[num_images][:-4] + "_det.jpg")
-          cv2.imwrite(result_path, im2show)
-      else:
-          im2showRGB = cv2.cvtColor(im2show, cv2.COLOR_BGR2RGB)
-          cv2.imshow("frame", im2showRGB)
-          total_toc = time.time()
-          total_time = total_toc - total_tic
-          frame_rate = 1 / total_time
-          print('Frame rate:', frame_rate)
-          if cv2.waitKey(1) & 0xFF == ord('q'):
-              break
-  if webcam_num >= 0:
-      cap.release()
-      cv2.destroyAllWindows()
+# python demo.py --cfg cfgs/vgg16.yml --dataset pascal_voc --net vgg16 --checksession 1 --checkepoch 6 --checkpoint 10021 --cuda --load_dir models/ --image_dir /home/chrizandr/sports/detection_exp/annotated/
+# python demo.py  --cfg cfgs/res101.yml --dataset pascal_voc --net res101 --checksession 1 --checkepoch 7 --checkpoint 10021 --cuda --load_dir models/ --image_dir /home/chrizandr/sports/detection_exp/annotated/
+# python demo.py --cfg cfgs/res101_ls.yml --net res101 --dataset coco --checksession 1 --checkepoch 10 --checkpoint 14657 --cuda --load_dir models/ --image_dir /home/chrizandr/sports/detection_exp/annotated/
+# python demo.py --cfg cfgs/res101.yml --net res101 --dataset coco --checksession 1 --checkepoch 10 --checkpoint 9771 --cuda --load_dir models/ --image_dir /home/chrizandr/sports/detection_exp/annotated/
